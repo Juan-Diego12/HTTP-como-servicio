@@ -1,0 +1,4 @@
+# Los scripts de PowerShell y de bash se guardan tal cual
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+*.zip binary

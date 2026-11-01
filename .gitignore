@@ -1,0 +1,10 @@
+# Datos de ejecución (cada PC tiene los suyos)
+/data/
+/uploads/
+/simulado/
+# Binarios
+*.exe
+/httpaas
+# IDE
+.idea/
+.vscode/

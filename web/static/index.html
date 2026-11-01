@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestión de páginas y aplicaciones web</title>
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="encabezado">
+      <h1>Gestión de páginas y aplicaciones web</h1>
+      <p id="modo" class="modo" hidden></p>
+    </header>
+
+    <section class="formulario" aria-label="Solicitar y publicar">
+      <label for="nombre">Nombre del host</label>
+      <div class="fila">
+        <input id="nombre" type="text" autocomplete="off" spellcheck="false"
+               placeholder="paisajes" maxlength="63" aria-describedby="ayuda-nombre">
+        <button id="aceptar" type="button">Aceptar</button>
+      </div>
+      <p id="ayuda-nombre" class="ayuda">La página quedará en <span id="vista-url">http://nombre.cloud.local</span></p>
+
+      <label for="zip">Contenido web (comprimido)</label>
+      <div class="fila">
+        <input id="zip" type="file" accept=".zip,application/zip">
+        <button id="publicar" type="button">Publicar</button>
+      </div>
+      <p class="ayuda">Un .zip con el index.html y sus archivos, para el host escrito arriba (máximo 50 MB).</p>
+
+      <p id="aviso" class="aviso" role="status" aria-live="polite" hidden></p>
+    </section>
+
+    <section class="instancias" aria-labelledby="titulo-instancias">
+      <h2 id="titulo-instancias">Instancias disponibles</h2>
+      <div class="tabla-contenedor">
+        <table>
+          <thead>
+            <tr><th>Página</th><th>Dirección IP</th><th>Host</th><th>Creada</th><th>Estado</th><th><span class="oculto">Acciones</span></th></tr>
+          </thead>
+          <tbody id="lista"></tbody>
+        </table>
+      </div>
+      <p id="vacio" class="vacio" hidden>Aún no hay instancias. Escriba un nombre de host y presione Aceptar para crear la primera.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
