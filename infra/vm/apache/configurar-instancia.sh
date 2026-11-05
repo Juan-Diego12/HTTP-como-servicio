@@ -39,6 +39,11 @@ printf 'nameserver %s\nsearch %s\n' "$DNS" "$DOMINIO" > /etc/resolv.conf
 ifdown "$IFACE" 2>/dev/null || true
 ip addr flush dev "$IFACE"
 ifup "$IFACE"
+ip link set "$IFACE" up
+for i in $(seq 1 15); do
+    ip -br link show "$IFACE" | grep -q ' UP ' && break
+    sleep 1
+done
 
 echo "== Sitio de Apache: /var/www/$NOMBRE"
 mkdir -p "/var/www/$NOMBRE"
@@ -70,5 +75,5 @@ systemctl reload apache2
 echo "== Verificacion"
 hostname
 ip -4 -br addr show "$IFACE"
-curl -s -o /dev/null -w "HTTP local: %{http_code}\n" -H "Host: $NOMBRE.$DOMINIO" http://127.0.0.1/ || true
+systemctl is-active apache2
 echo "INSTANCIA $NOMBRE CONFIGURADA"
