@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"httpaas/internal/orquestador"
 	"httpaas/internal/web"
@@ -26,7 +28,9 @@ func main() {
 	var ejecutor orquestador.Ejecutor
 	if modo == "real" {
 		// Llama a los scripts de Daniel: crear-instancia, registrar-dns, desplegar y eliminar.
-		ejecutor = orquestador.NuevoEjecutorScripts(env("SCRIPTS_DIR", "scripts"), env("SCRIPTS_EXT", ".ps1"))
+		minutos, _ := strconv.Atoi(env("SCRIPTS_TIMEOUT", "25")) // minutos por script
+		ejecutor = orquestador.NuevoEjecutorScripts(env("SCRIPTS_DIR", "scripts"), env("SCRIPTS_EXT", ".ps1"),
+			time.Duration(minutos)*time.Minute)
 	} else {
 		// Simula las 4 operaciones sin VirtualBox; el contenido se publica en /sim/<nombre>/.
 		modo = "simulado"
@@ -41,6 +45,7 @@ func main() {
 		PrimeraIP:    30,
 		UltimaIP:     254,
 		Modo:         modo,
+		VBoxManage:   orquestador.RutaVBoxManage(),
 	}, ejecutor)
 	if err != nil {
 		log.Fatal("no se pudo iniciar el orquestador: ", err)

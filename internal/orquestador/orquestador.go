@@ -26,6 +26,7 @@ type Config struct {
 	PrimeraIP    int    // 30
 	UltimaIP     int    // 254
 	Modo         string // "simulado" o "real"
+	VBoxManage   string // ruta de VBoxManage (solo modo real)
 }
 
 // Orquestador es el componente central de la app.
@@ -35,6 +36,7 @@ type Orquestador struct {
 	mu         sync.Mutex // protege instancias y el archivo JSON
 	instancias map[string]*Instancia
 	cola       sync.Mutex // una operación de infraestructura a la vez (VBoxManage, nsupdate)
+	asignacion sync.Mutex // una solicitud de Aceptar a la vez (validación de nombre e IP)
 }
 
 // Hostname válido (RFC 1123), en minúsculas: letras, números y guiones, sin guion al inicio ni al final.
@@ -43,6 +45,7 @@ var reHostname = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 // Nombres que no pueden usar los usuarios (servidor DNS, plantilla y similares).
 var reservados = map[string]bool{
 	"ns": true, "www": true, "localhost": true, "apacheserver": true, "plantilla": true,
+	"dns-plantilla": true, "np2-base": true, "cloud": true,
 }
 
 // Errores de validación (la interfaz los muestra tal cual).
@@ -76,7 +79,29 @@ func Nuevo(cfg Config, ej Ejecutor) (*Orquestador, error) {
 			i.Estado, i.Mensaje = ConError, "la eliminación se interrumpió por un reinicio de la aplicación; intente eliminar de nuevo"
 		}
 	}
+	if cfg.Modo == "real" {
+		o.reconciliar()
+	}
 	return o, o.guardar()
+}
+
+// reconciliar marca las instancias cuya VM ya no existe en VirtualBox (por ejemplo,
+// si alguien la borró a mano mientras la app estaba cerrada).
+func (o *Orquestador) reconciliar() {
+	vms, err := ListarVMs(o.cfg.VBoxManage)
+	if err != nil {
+		log.Printf("aviso: %v", err)
+		return
+	}
+	for _, i := range o.instancias {
+		if i.Estado != Lista && i.Estado != Publicada {
+			continue
+		}
+		if _, existe := buscarVM(vms, i.Nombre); !existe {
+			i.Estado, i.Mensaje = ConError, "la VM ya no existe en VirtualBox; use Eliminar para quitarla de la lista"
+			log.Printf("instancia %s: su VM ya no existe", i.Nombre)
+		}
+	}
 }
 
 // Modo devuelve "simulado" o "real".
@@ -157,22 +182,6 @@ func (o *Orquestador) url(nombre string) string {
 	return fmt.Sprintf("http://%s.%s", nombre, o.cfg.Dominio)
 }
 
-// siguienteIP busca la primera IP libre del rango. Se llama con o.mu tomado.
-// Las instancias con error conservan su IP hasta que se eliminen.
-func (o *Orquestador) siguienteIP() string {
-	usadas := map[string]bool{}
-	for _, i := range o.instancias {
-		usadas[i.IP] = true
-	}
-	for n := o.cfg.PrimeraIP; n <= o.cfg.UltimaIP; n++ {
-		ip := fmt.Sprintf("%s.%d", o.cfg.Red, n)
-		if !usadas[ip] {
-			return ip
-		}
-	}
-	return ""
-}
-
 // ValidarNombre normaliza el nombre y explica por qué no es válido.
 func ValidarNombre(nombre string) (string, error) {
 	nombre = strings.ToLower(strings.TrimSpace(nombre))
@@ -198,17 +207,51 @@ func (o *Orquestador) Aceptar(nombre string) (Instancia, error) {
 	if err != nil {
 		return Instancia{}, err
 	}
+	// Una solicitud a la vez: así dos usuarios no reciben la misma IP.
+	o.asignacion.Lock()
+	defer o.asignacion.Unlock()
+
 	o.mu.Lock()
-	if _, existe := o.instancias[nombre]; existe {
-		o.mu.Unlock()
+	_, existe := o.instancias[nombre]
+	usadas := map[string]bool{}
+	for _, i := range o.instancias {
+		usadas[i.IP] = true
+	}
+	o.mu.Unlock()
+	if existe {
 		return Instancia{}, fmt.Errorf("ya existe una instancia llamada %s", nombre)
 	}
-	ip := o.siguienteIP()
+
+	if o.cfg.Modo == "real" {
+		// No se puede usar el nombre de una VM que ya existe (plantillas, otros laboratorios...).
+		vms, err := ListarVMs(o.cfg.VBoxManage)
+		if err != nil {
+			return Instancia{}, err
+		}
+		if vm, ocupado := buscarVM(vms, nombre); ocupado {
+			return Instancia{}, fmt.Errorf("ya existe una máquina virtual llamada %q en VirtualBox; elija otro nombre", vm)
+		}
+	}
+
+	// Primera IP del rango que no tenga otra instancia y, en modo real, que nadie responda en la red.
+	ip := ""
+	for n := o.cfg.PrimeraIP; n <= o.cfg.UltimaIP && ip == ""; n++ {
+		candidata := fmt.Sprintf("%s.%d", o.cfg.Red, n)
+		if usadas[candidata] {
+			continue
+		}
+		if o.cfg.Modo == "real" && IPResponde(candidata) {
+			log.Printf("la IP %s responde en la red: se omite", candidata)
+			continue
+		}
+		ip = candidata
+	}
 	if ip == "" {
-		o.mu.Unlock()
 		return Instancia{}, errors.New("no hay direcciones IP libres en el rango")
 	}
+
 	inst := &Instancia{Nombre: nombre, IP: ip, Estado: Creando, Creada: time.Now(), URL: o.url(nombre)}
+	o.mu.Lock()
 	o.instancias[nombre] = inst
 	err = o.guardar()
 	copia := *inst
@@ -290,10 +333,14 @@ func (o *Orquestador) desplegar(nombre, rutaZip, nombreArchivo string, anterior 
 	o.cola.Lock()
 	defer o.cola.Unlock()
 
-	if salida, err := o.ej.Desplegar(nombre, rutaZip); err != nil {
+	salida, err := o.ej.Desplegar(nombre, rutaZip)
+	if err != nil {
 		// La VM sigue bien: vuelve a su estado anterior con el mensaje de error.
 		o.fallo(nombre, anterior, "desplegar", err, salida)
 		return
+	}
+	if a := lineaCon(salida, "AVISO:"); a != "" {
+		aviso = "aviso: " + strings.TrimSpace(strings.TrimPrefix(a, "AVISO:"))
 	}
 	ahora := time.Now()
 	o.actualizar(nombre, func(i *Instancia) {
@@ -343,12 +390,29 @@ func (o *Orquestador) eliminar(nombre string) {
 
 // fallo deja la instancia en el estado indicado con un mensaje legible.
 func (o *Orquestador) fallo(nombre string, estado Estado, operacion string, err error, salida string) {
-	mensaje := fmt.Sprintf("falló %s: %v", operacion, err)
-	if s := ultimasLineas(salida, 3); s != "" {
-		mensaje += " | " + s
+	mensaje := fmt.Sprintf("falló %s", operacion)
+	if e := lineaCon(salida, "ERROR:"); e != "" {
+		// Los scripts de infraestructura explican el fallo en una línea "ERROR: ...".
+		mensaje += ": " + strings.TrimSpace(strings.TrimPrefix(e, "ERROR:"))
+	} else {
+		mensaje += fmt.Sprintf(": %v", err)
+		if s := ultimasLineas(salida, 3); s != "" {
+			mensaje += " | " + s
+		}
 	}
 	log.Printf("instancia %s: %s", nombre, mensaje)
 	o.actualizar(nombre, func(i *Instancia) { i.Estado, i.Mensaje = estado, mensaje })
+}
+
+// lineaCon devuelve la última línea de la salida que empieza con el prefijo indicado.
+func lineaCon(texto, prefijo string) string {
+	resultado := ""
+	for _, l := range strings.Split(strings.ReplaceAll(texto, "\r", ""), "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, prefijo) {
+			resultado = l
+		}
+	}
+	return resultado
 }
 
 func ultimasLineas(texto string, n int) string {

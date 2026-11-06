@@ -22,8 +22,13 @@ type EjecutorScripts struct {
 }
 
 // NuevoEjecutorScripts prepara el intérprete según la extensión de los scripts.
-func NuevoEjecutorScripts(dir, extension string) *EjecutorScripts {
-	e := &EjecutorScripts{Dir: dir, Extension: extension, Tiempo: 10 * time.Minute}
+// tiempo es el máximo por script; crear-instancia puede tardar varios minutos
+// (arranque de la VM, configuración y verificación por HTTP).
+func NuevoEjecutorScripts(dir, extension string, tiempo time.Duration) *EjecutorScripts {
+	if tiempo <= 0 {
+		tiempo = 25 * time.Minute
+	}
+	e := &EjecutorScripts{Dir: dir, Extension: extension, Tiempo: tiempo}
 	if extension == ".bat" || extension == ".cmd" {
 		e.Interprete, e.Prefijo = "cmd", []string{"/c"}
 	} else {

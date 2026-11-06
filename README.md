@@ -38,6 +38,8 @@ Abrir http://127.0.0.1:8080.
 | `RED` | `192.168.10` | red host-only; las instancias usan `.30` a `.254` |
 | `SCRIPTS_DIR` | `scripts` | carpeta de los scripts |
 | `SCRIPTS_EXT` | `.ps1` | `.ps1` o `.bat` |
+| `SCRIPTS_TIMEOUT` | `25` | minutos máximos por script |
+| `VBOXMANAGE` | el del PATH | ruta de VBoxManage (modo real) |
 
 ## Ciclo de vida de una instancia
 
@@ -47,11 +49,12 @@ Aceptar -> creando -> lista -> (Publicar) -> publicando -> publicada
 Eliminar -> eliminando -> (se borra de la lista)   o   error
 ```
 
-- **Aceptar** valida el nombre (hostname RFC 1123 en minúsculas, único y no reservado), asigna la primera IP libre y ejecuta `crear-instancia` y `registrar-dns`.
+- **Aceptar** valida el nombre (hostname RFC 1123 en minúsculas, único y no reservado). En modo real también verifica que no exista una VM con ese nombre en VirtualBox (sin distinguir mayúsculas). Asigna la primera IP del rango que no use otra instancia y que no responda ping, y ejecuta `crear-instancia` y `registrar-dns`.
 - **Publicar** valida el `.zip` (formato, que no esté vacío y sin rutas peligrosas) y ejecuta `desplegar`.
 - **Eliminar** ejecuta `eliminar` y quita la instancia de la lista.
 - Las operaciones de infraestructura se ejecutan en segundo plano y de una en una; el dashboard se actualiza cada 2 segundos.
-- El estado se guarda en `data/instancias.json` y se recupera al reiniciar la app. Si la app se cerró a mitad de una operación, esa instancia queda marcada con un mensaje para repetirla.
+- El estado se guarda en `data/instancias.json` y se recupera al reiniciar la app. Si la app se cerró a mitad de una operación, esa instancia queda marcada con un mensaje para repetirla. En modo real, al arrancar se comprueba que las VMs de las instancias sigan existiendo.
+- Si un script falla, el dashboard muestra su línea `ERROR: ...`; si `desplegar` termina con una línea `AVISO: ...`, se muestra como aviso.
 
 ## Modo simulado
 
